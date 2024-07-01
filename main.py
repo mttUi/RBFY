@@ -6,18 +6,22 @@ bot = telebot.TeleBot("7221264332:AAGeFT7XSjgEkOtgGhJJ2wXKEG-0FSNF4ow")
 
 
 # Функция для чтения расписания из Excel файла
-def get_schedule(sheet_name):
-    # Загрузите Excel файл
-    df = pd.read_excel('schedule.xlsx', sheet_name=sheet_name, engine='openpyxl', index_col=0)
+def get_schedule(sheet_name, day):
+    try:
+        # Загрузите Excel файл
+        df = pd.read_excel('schedule.xlsx', sheet_name=sheet_name, engine='openpyxl', index_col=0)
 
-    # Преобразуем расписание в текстовый формат
-    schedule_text = ""
-    for index, row in df.iterrows():
-        schedule_text += f"{index}:\n"
-        for day in df.columns:
-            schedule_text += f"{day}: {row[day]}\n"
-        schedule_text += "\n"
-    return schedule_text
+        # Преобразуем расписание для конкретного дня в текстовый формат
+        schedule_text = f"Расписание для {day}:\n\n"
+        for index, row in df.iterrows():
+            schedule_text += f"{index}: {row[day]}\n"
+        return schedule_text
+    except Exception as e:
+        return f"Ошибка при чтении расписания для {sheet_name} и {day}: {e}"
+
+
+# Словарь для хранения выбранной группы и предыдущих сообщений для каждого пользователя
+user_data = {}
 
 
 @bot.message_handler(commands=['start'])
@@ -29,44 +33,79 @@ def start(message):
 
     pbtn = types.InlineKeyboardMarkup()
     pbtn1 = types.InlineKeyboardButton(text='РБД/1гр/1пг', callback_data='РБД 1гр 1пг')
-    pbtn2 = types.InlineKeyboardButton(text='РБД/1гр/2пг', callback_data='РБД/1гр/2пг')
-    pbtn3 = types.InlineKeyboardButton(text='РБД/2гр/1пг', callback_data='РБД/2гр/1пг')
-    pbtn4 = types.InlineKeyboardButton(text='РБД/2гр/2пг', callback_data='РБД/2гр/2пг')
-    pbtn5 = types.InlineKeyboardButton(text='РИСКУ/1гр/1пг', callback_data='РИСКУ/1гр/1пг')
-    pbtn6 = types.InlineKeyboardButton(text='РИСКУ/1гр/2пг', callback_data='РИСКУ/1гр/2пг')
-    pbtn7 = types.InlineKeyboardButton(text='🌐Информация', callback_data='7')
-    pbtn.add(pbtn1, pbtn2, pbtn3, pbtn4, pbtn5, pbtn6, pbtn7)
+    pbtn2 = types.InlineKeyboardButton(text='РБД/1гр/2пг', callback_data='РБД 1гр 2пг')
+    pbtn3 = types.InlineKeyboardButton(text='РБД/2гр/1пг', callback_data='РБД 2гр 1пг')
+    pbtn4 = types.InlineKeyboardButton(text='РБД/2гр/2пг', callback_data='РБД 2гр 2пг')
+    pbtn5 = types.InlineKeyboardButton(text='РИСКУ/1гр/1пг', callback_data='РИСКУ 1гр 1пг')
+    pbtn6 = types.InlineKeyboardButton(text='РИСКУ/1гр/2пг', callback_data='РИСКУ 1гр 2пг')
+    pbtn.add(pbtn1, pbtn2, pbtn3, pbtn4, pbtn5, pbtn6)
 
     sent_message = bot.send_message(message.chat.id, "Выберите свою группу обучения", reply_markup=pbtn,
                                     parse_mode='html')
 
-    # Удаление сообщения пользователя и бота
+    # Сохранение данных о пользователе
+    user_data[message.chat.id] = {'last_bot_message_id': sent_message.message_id}
+
+    # Удаление сообщения пользователя
     bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
-    schedule_text = get_schedule(call.data)
-    bot.send_message(call.message.chat.id, schedule_text)
+    if ' ' in call.data:
+        # Сохраняем выбранную группу и предлагаем выбрать день недели
+        user_data[call.message.chat.id] = {'group': call.data}
+        send_day_selection(call.message)
+    elif call.data == 'back':
+        # Возвращаем пользователя к выбору дня недели
+        send_day_selection(call.message)
+    else:
+        # Обработка выбора дня недели и отправка расписания
+        try:
+            group = user_data[call.message.chat.id].get('group')
+            if group:
+                schedule_text = get_schedule(group, call.data)
+                schedule_text += "\n\nВыберите действие:"
+                schedule_markup = types.InlineKeyboardMarkup()
+                back_button = types.InlineKeyboardButton(text="Назад", callback_data='back')
+                schedule_markup.add(back_button)
+                sent_message = bot.send_message(call.message.chat.id, schedule_text, reply_markup=schedule_markup)
+
+                # Удаление предыдущего сообщения бота
+                bot.delete_message(chat_id=call.message.chat.id,
+                                   message_id=user_data[call.message.chat.id]['last_bot_message_id'])
+                user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
+
+            else:
+                sent_message = bot.send_message(call.message.chat.id, "Ошибка: сначала выберите группу.")
+                user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
+
+        except Exception as e:
+            sent_message = bot.send_message(call.message.chat.id, f"Ошибка при обработке запроса: {e}")
+            user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
 
 
 @bot.message_handler(content_types=['text'])
 def otvet(message):
-    pbtn = types.InlineKeyboardMarkup()
-    pbtn1 = types.InlineKeyboardButton(text='РБД/1гр/1пг', callback_data='РБД 1гр 1пг')
-    pbtn2 = types.InlineKeyboardButton(text='РБД/1гр/2пг', callback_data='РБД/1гр/2пг')
-    pbtn3 = types.InlineKeyboardButton(text='РБД/2гр/1пг', callback_data='РБД/2гр/1пг')
-    pbtn4 = types.InlineKeyboardButton(text='РБД/2гр/2пг', callback_data='РБД/2гр/2пг')
-    pbtn5 = types.InlineKeyboardButton(text='РИСКУ/1гр/1пг', callback_data='РИСКУ/1гр/1пг')
-    pbtn6 = types.InlineKeyboardButton(text='РИСКУ/1гр/2пг', callback_data='РИСКУ/1гр/2пг')
-    pbtn7 = types.InlineKeyboardButton(text='🌐Информация', callback_data='7')
-    pbtn.add(pbtn1, pbtn2, pbtn3, pbtn4, pbtn5, pbtn6, pbtn7)
-
     if message.text == "🌐Информация":
-        sent_message = bot.send_message(message.chat.id, "Создатели тутуттутут", reply_markup=pbtn, parse_mode='html')
+        sent_message = bot.send_message(message.chat.id, "Создатели тутуттутут")
 
-        # Удаление сообщения пользователя и бота
+        # Удаление сообщения пользователя и сохранение ID сообщения бота
         bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        user_data[message.chat.id] = {'last_bot_message_id': sent_message.message_id}
+
+
+def send_day_selection(message):
+    days_markup = types.InlineKeyboardMarkup()
+    days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+    for day in days:
+        days_markup.add(types.InlineKeyboardButton(text=day, callback_data=day))
+    sent_message = bot.send_message(message.chat.id, "Выберите день недели:", reply_markup=days_markup)
+
+    # Удаление предыдущего сообщения бота
+    if message.chat.id in user_data and 'last_bot_message_id' in user_data[message.chat.id]:
+        bot.delete_message(chat_id=message.chat.id, message_id=user_data[message.chat.id]['last_bot_message_id'])
+    user_data[message.chat.id]['last_bot_message_id'] = sent_message.message_id
 
 
 bot.polling(none_stop=True)
