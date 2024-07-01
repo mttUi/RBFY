@@ -20,7 +20,7 @@ def get_schedule(sheet_name, day):
         return f"Ошибка при чтении расписания для {sheet_name} и {day}: {e}"
 
 
-# Словарь для хранения выбранной группы и предыдущих сообщений для каждого пользователя
+# Словарь для хранения данных о пользователе
 user_data = {}
 
 
@@ -44,7 +44,7 @@ def start(message):
                                     parse_mode='html')
 
     # Сохранение данных о пользователе
-    user_data[message.chat.id] = {'last_bot_message_id': sent_message.message_id}
+    user_data[message.chat.id] = {'last_bot_message_ids': [sent_message.message_id]}
 
     # Удаление сообщения пользователя
     bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
@@ -54,11 +54,14 @@ def start(message):
 def callback_query(call):
     if ' ' in call.data:
         # Сохраняем выбранную группу и предлагаем выбрать день недели
-        user_data[call.message.chat.id] = {'group': call.data}
+        user_data[call.message.chat.id]['group'] = call.data
         send_day_selection(call.message)
     elif call.data == 'back':
         # Возвращаем пользователя к выбору дня недели
         send_day_selection(call.message)
+    elif call.data == 'select_group':
+        # Возвращаем пользователя к выбору группы
+        start(call.message)
     else:
         # Обработка выбора дня недели и отправка расписания
         try:
@@ -68,31 +71,36 @@ def callback_query(call):
                 schedule_text += "\n\nВыберите действие:"
                 schedule_markup = types.InlineKeyboardMarkup()
                 back_button = types.InlineKeyboardButton(text="Назад", callback_data='back')
-                schedule_markup.add(back_button)
+                select_group_button = types.InlineKeyboardButton(text="К выбору группы", callback_data='select_group')
+                schedule_markup.add(back_button, select_group_button)
                 sent_message = bot.send_message(call.message.chat.id, schedule_text, reply_markup=schedule_markup)
 
-                # Удаление предыдущего сообщения бота
-                bot.delete_message(chat_id=call.message.chat.id,
-                                   message_id=user_data[call.message.chat.id]['last_bot_message_id'])
-                user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
+                # Удаление предыдущих сообщений бота
+                delete_previous_messages(call.message.chat.id)
+                user_data[call.message.chat.id]['last_bot_message_ids'] = [sent_message.message_id]
 
             else:
                 sent_message = bot.send_message(call.message.chat.id, "Ошибка: сначала выберите группу.")
-                user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
+                delete_previous_messages(call.message.chat.id)
+                user_data[call.message.chat.id]['last_bot_message_ids'] = [sent_message.message_id]
 
         except Exception as e:
             sent_message = bot.send_message(call.message.chat.id, f"Ошибка при обработке запроса: {e}")
-            user_data[call.message.chat.id]['last_bot_message_id'] = sent_message.message_id
+            delete_previous_messages(call.message.chat.id)
+            user_data[call.message.chat.id]['last_bot_message_ids'] = [sent_message.message_id]
 
 
 @bot.message_handler(content_types=['text'])
 def otvet(message):
-    if message.text == "🌐Информация":
+    if message.text == "👤Информация":
         sent_message = bot.send_message(message.chat.id, "Создатели тутуттутут")
 
-        # Удаление сообщения пользователя и сохранение ID сообщения бота
+        # Удаление сообщений пользователя и бота
+        delete_previous_messages(message.chat.id)
+        user_data[message.chat.id] = {'last_bot_message_ids': [sent_message.message_id]}
+
+        # Удаление сообщения пользователя
         bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-        user_data[message.chat.id] = {'last_bot_message_id': sent_message.message_id}
 
 
 def send_day_selection(message):
@@ -102,10 +110,18 @@ def send_day_selection(message):
         days_markup.add(types.InlineKeyboardButton(text=day, callback_data=day))
     sent_message = bot.send_message(message.chat.id, "Выберите день недели:", reply_markup=days_markup)
 
-    # Удаление предыдущего сообщения бота
-    if message.chat.id in user_data and 'last_bot_message_id' in user_data[message.chat.id]:
-        bot.delete_message(chat_id=message.chat.id, message_id=user_data[message.chat.id]['last_bot_message_id'])
-    user_data[message.chat.id]['last_bot_message_id'] = sent_message.message_id
+    # Удаление предыдущих сообщений бота
+    delete_previous_messages(message.chat.id)
+    user_data[message.chat.id]['last_bot_message_ids'] = [sent_message.message_id]
+
+
+def delete_previous_messages(chat_id):
+    if chat_id in user_data:
+        for message_id in user_data[chat_id].get('last_bot_message_ids', []):
+            try:
+                bot.delete_message(chat_id, message_id)
+            except Exception as e:
+                print(f"Ошибка при удалении сообщения {message_id} в чате {chat_id}: {e}")
 
 
 bot.polling(none_stop=True)
